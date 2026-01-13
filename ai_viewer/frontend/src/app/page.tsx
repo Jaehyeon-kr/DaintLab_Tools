@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo, Suspense, lazy } from "react";
+import { useState, useCallback, useMemo, Suspense, lazy, useEffect } from "react";
 import { ModelStructure, LayerInfo, ComputationStep } from "@/types/model";
 import ModelSelector from "@/components/ModelSelector";
 import ModelViewer2D from "@/components/ModelViewer2D";
@@ -12,7 +12,18 @@ const ModelViewer3D = lazy(() => import("@/components/ModelViewer3D"));
 
 type ViewMode = "2d" | "3d";
 
+interface ModelInfo {
+  id: string;
+  name: string;
+  type: string;
+  custom?: boolean;
+}
+
 export default function Home() {
+  const [models, setModels] = useState<ModelInfo[]>([
+    { id: "tiny_resnet", name: "Tiny ResNet", type: "CNN" },
+    { id: "mini_transformer", name: "Mini Transformer", type: "Transformer" },
+  ]);
   const [selectedModel, setSelectedModel] = useState("tiny_resnet");
   const [modelStructure, setModelStructure] = useState<ModelStructure | null>(null);
   const [activeLayerId, setActiveLayerId] = useState<string | null>(null);
@@ -23,6 +34,57 @@ export default function Home() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [animationSpeed, setAnimationSpeed] = useState(1);
   const [error, setError] = useState<string | null>(null);
+
+  // 모델 목록 가져오기
+  const fetchModels = useCallback(async () => {
+    try {
+      const response = await fetch("/api/models/list");
+      if (response.ok) {
+        const data = await response.json();
+        setModels(data.models);
+      }
+    } catch (err) {
+      console.error("Failed to fetch models:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchModels();
+  }, [fetchModels]);
+
+  // 모델 업로드
+  const handleModelUpload = useCallback(async (modelData: {
+    file: File;
+    name: string;
+    modelType: string;
+    inputChannels: number;
+    inputHeight: number;
+    inputWidth: number;
+  }) => {
+    const formData = new FormData();
+    formData.append("file", modelData.file);
+    formData.append("name", modelData.name);
+    formData.append("model_type", modelData.modelType);
+    formData.append("input_channels", modelData.inputChannels.toString());
+    formData.append("input_height", modelData.inputHeight.toString());
+    formData.append("input_width", modelData.inputWidth.toString());
+
+    const response = await fetch("/api/models/upload", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const data = await response.json();
+      throw new Error(data.error || "Upload failed");
+    }
+
+    const data = await response.json();
+
+    // 업로드 성공 시 자동으로 선택
+    setSelectedModel(data.model_id);
+    return data;
+  }, []);
 
   const loadModel = useCallback(async () => {
     setIsLoading(true);
@@ -38,6 +100,7 @@ export default function Home() {
       setModelStructure(data.structure);
       setActiveLayerId(null);
       setComputationSteps([]);
+      setInputImage(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "알 수 없는 오류");
     } finally {
@@ -104,6 +167,9 @@ export default function Home() {
             onModelChange={setSelectedModel}
             onLoadModel={loadModel}
             isLoading={isLoading}
+            models={models}
+            onModelUpload={handleModelUpload}
+            onRefreshModels={fetchModels}
           />
 
           {error && (
